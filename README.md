@@ -1,4 +1,4 @@
-# Neural Variational Inference (NVIL) Example in Python and Theano
+# NVIL Example
 
 This is a reference implementation of the Neural Variational Inference and Learning (NVIL) variational inference algorithm, as described in the following publication:
 
