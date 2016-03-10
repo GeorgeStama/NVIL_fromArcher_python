@@ -134,7 +134,7 @@ class BuildModel():
         
         grads,_ = theano.map(comp_param_grad, sequences = [T.arange(self.Y.shape[0])], non_sequences = [p_yh, q_hgy, C_out, l, self.c, self.v] )
         
-        return [-g.mean(axis=0, dtype=theano.config.floatX) for g in grads]
+        return [g.mean(axis=0, dtype=theano.config.floatX) for g in grads]
     
     def update_cv(self, l):
         batch_y = T.matrix('batch_y')
@@ -159,30 +159,6 @@ class BuildModel():
         
         return perform_updates_cv
 
-    def Adam(self, grads, params, lr=0.0002, b1=0.1, b2=0.001, e=1e-8):
-        # Adapted from adam.py by Alec Radford
-        # Copyright (c) 2015 Alec Radford
-        # https://github.com/sordonia/hred-qs/blob/master/adam.py        
-        updates = []
-        i = theano.shared(0.0, dtype=theano.config.floatX)
-        i_t = i + 1.
-        fix1 = 1. - (1. - b1)**i_t
-        fix2 = 1. - (1. - b2)**i_t
-        lr_t = lr * (T.sqrt(fix2) / fix1)
-        for p, mg in zip(params, grads):
-            g = -mg
-            m = theano.shared(p.get_value() * 0., dtype=theano.config.floatX)
-            v = theano.shared(p.get_value() * 0., dtype=theano.config.floatX)
-            m_t = (b1 * g) + ((1. - b1) * m)
-            v_t = (b2 * T.sqr(g)) + ((1. - b2) * v)
-            g_t = m_t / (T.sqrt(v_t) + e)
-            p_t = p  - (lr_t * g_t) 
-            updates.append((m, m_t)) 
-            updates.append((v, v_t))
-            updates.append((p, p_t)) 
-        updates.append((i, i_t))
-        return updates
-    
     def update_params(self, grads, L):
         batch_y = T.matrix('batch_y')
         h = T.lmatrix('h')
@@ -191,10 +167,10 @@ class BuildModel():
         # SGD updates
         #updates = [(p, p + lr*g) for (p,g) in zip(self.getParams(), grads)]
         
-        # Adam updates
-        #updates = self.Adam(grads, self.getParams(), lr, self.b1, self.b2, self.e)
-        
-        updates = lasagne.updates.adam(grads, self.getParams(), lr)#, 1 - self.b1, 1 - self.b2, self.e)
+        # Adam updates        
+        # We negate gradients because we formulate in terms of maximization.
+        updates = lasagne.updates.adam([-g for g in grads], self.getParams(), lr) 
+        #, 1 - self.b1, 1 - self.b2, self.e)
        
         perform_updates_params = theano.function(
                  outputs=L,
@@ -220,11 +196,12 @@ class BuildModel():
     
         param_updater = self.update_params(grads,L)
 
+        avg_costs = []
+        
         epoch = 0
         while epoch < max_epochs:
             sys.stdout.write("\r%0.2f%%\n" % (epoch * 100./ max_epochs))
             sys.stdout.flush()
-            avg_costs = []
             batch_counter = 0
             for y in train_set_iterator:
                 hsamp_np = self.mrec.getSample(y)
@@ -232,11 +209,7 @@ class BuildModel():
                 avg_cost = param_updater(y, hsamp_np, learning_rate)
                 if np.mod(batch_counter, 10) == 0:
                     print '(c,v,L): (%f,%f,%f)\n' % (np.asarray(cx), np.asarray(vx), avg_cost)
-                hsamp_np0 = self.mrec.getSample(y)
-                if type(avg_cost) == list:
-                    avg_costs.append(avg_cost[0])
-                else:
-                    avg_costs.append(avg_cost)
+                avg_costs.append(avg_cost)
                 batch_counter += 1
             epoch += 1
         return avg_costs
