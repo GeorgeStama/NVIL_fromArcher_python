@@ -35,7 +35,7 @@ class GenerativeModel(object):
         self.nrng = nrng
 
         # internal RV for generating sample
-        self.Xsamp = T.dmatrix('Xsamp')
+        self.Xsamp = T.matrix('Xsamp')
 
     def evaluateLogDensity(self):
         '''
@@ -70,26 +70,26 @@ class MixtureOfGaussians(GenerativeModel):
 
         # Mixture distribution
         if 'pi' in GenerativeParams:
-            self.pi_un  = theano.shared(value=GenerativeParams['pi'], name='pi_un' ,borrow=True)     # cholesky of observation noise cov matrix
+            self.pi_un  = theano.shared(value=np.asarray(GenerativeParams['pi'], dtype = theano.config.floatX), name='pi_un', borrow=True)     # cholesky of observation noise cov matrix
         else:
-            self.pi_un  = theano.shared(value=np.random.rand(xDim),name='pi_un' ,borrow=True)     # cholesky of observation noise cov matrix
+            self.pi_un  = theano.shared(value=np.asarray(np.ones(xDim), dtype = theano.config.floatX), name='pi_un' ,borrow=True)     # cholesky of observation noise cov matrix
         self.pi = self.pi_un/self.pi_un.sum()
 
         if 'RChol' in GenerativeParams:
-            self.RChol  = theano.shared(value=GenerativeParams['RChol'],name='RChol' ,borrow=True)     # cholesky of observation noise cov matrix
+            self.RChol  = theano.shared(value=np.asarray(GenerativeParams['RChol'], dtype = theano.config.floatX), name='RChol' ,borrow=True)     # cholesky of observation noise cov matrix
         else:
-            self.RChol  = theano.shared(value=np.random.randn(xDim, yDim, yDim)/5,name='RChol' ,borrow=True)     # cholesky of observation noise cov matrix
+            self.RChol  = theano.shared(value=np.asarray(np.random.randn(xDim, yDim, yDim)/5, dtype = theano.config.floatX), name='RChol' ,borrow=True)     # cholesky of observation noise cov matrix
 
         if 'x0' in GenerativeParams:
-            self.mu     = theano.shared(value=GenerativeParams['mu']    ,name='mu'    ,borrow=True)     # set to zero for stationary distribution
+            self.mu     = theano.shared(value=np.asarray(GenerativeParams['mu'], dtype = theano.config.floatX), name='mu',borrow=True)     # set to zero for stationary distribution
         else:
-            self.mu     = theano.shared(value=np.random.randn(xDim, yDim)    ,name='mu'    ,borrow=True)     # set to zero for stationary distribution
+            self.mu     = theano.shared(value=np.asarray(np.random.randn(xDim, yDim), dtype = theano.config.floatX), name='mu', borrow=True)     # set to zero for stationary distribution
 
 
     def sampleXY(self,_N):
 
         _mu = self.mu.eval()
-        _RChol = self.RChol.eval()
+        _RChol = np.asarray(self.RChol.eval())
         _pi = self.pi.eval()
 
         b_vals = np.random.multinomial(1, _pi, size=_N)
@@ -99,6 +99,9 @@ class MixtureOfGaussians(GenerativeModel):
         for ii in xrange(_N):
             y_vals[ii] = np.dot(np.random.randn(1,self.yDim), _RChol[x_vals[ii],:,:].T) + _mu[x_vals[ii]]
 
+        b_vals = np.asarray(b_vals,dtype = theano.config.floatX)
+        y_vals = np.asarray(y_vals,dtype = theano.config.floatX)
+        
         return [b_vals, y_vals]
 
     def getParams(self):

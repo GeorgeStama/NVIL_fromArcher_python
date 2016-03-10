@@ -55,7 +55,8 @@ class BuildModel():
                 rec_params, # dictionary of approximate posterior ("recognition model") parameters
                 REC_MODEL, # class that inherits from RecognitionModel
                 xDim=2, # dimensionality of latent state
-                yDim=2 # dimensionality of observations
+                yDim=2, # dimensionality of observations
+                nCUnits = 100 # number of units used in the (single-layer) bias-correction network
                 ):
         
         # instantiate rng's
@@ -64,7 +65,7 @@ class BuildModel():
         
         #---------------------------------------------------------
         ## actual model parameters
-        self.X, self.Y = T.dmatrices('X','Y')   # symbolic variables for the data
+        self.X, self.Y = T.matrices('X','Y')   # symbolic variables for the data
         self.hsamp = T.lmatrix('hsamp')
 
         self.xDim   = xDim
@@ -79,12 +80,12 @@ class BuildModel():
         
         # NVIL Bias-correction network
         C_nn = lasagne.layers.InputLayer((None, yDim))
-        C_nn = lasagne.layers.DenseLayer(C_nn, 100, nonlinearity=leaky_rectify, W=lasagne.init.Orthogonal())
+        C_nn = lasagne.layers.DenseLayer(C_nn, nCUnits, nonlinearity=leaky_rectify, W=lasagne.init.Orthogonal())
         self.C_nn = lasagne.layers.DenseLayer(C_nn, 1, nonlinearity=linear, W=lasagne.init.Orthogonal())
         
-        self.c = theano.shared(value = opt_params['c0'])
-        self.v = theano.shared(value = opt_params['v0'])
-        self.alpha = theano.shared(value = opt_params['alpha'])
+        self.c = theano.shared(value = np.asarray(opt_params['c0'], dtype=theano.config.floatX))
+        self.v = theano.shared(value = np.asarray(opt_params['v0'], dtype=theano.config.floatX))
+        self.alpha = theano.shared(value = np.asarray(opt_params['alpha'], dtype=theano.config.floatX))
         # ADAM defaults
         self.b1=0.1
         self.b2=0.001
@@ -133,15 +134,15 @@ class BuildModel():
         
         grads,_ = theano.map(comp_param_grad, sequences = [T.arange(self.Y.shape[0])], non_sequences = [p_yh, q_hgy, C_out, l, self.c, self.v] )
         
-        return [g.mean(axis=0) for g in grads]
+        return [-g.mean(axis=0, dtype=theano.config.floatX) for g in grads]
     
     def update_cv(self, l):
-        batch_y = T.dmatrix('batch_y')
+        batch_y = T.matrix('batch_y')
         h = T.lmatrix('h')
         
         # Now compute derived quantities for the update
-        cb = l.mean()
-        vb = l.var()
+        cb = l.mean(dtype = theano.config.floatX)
+        vb = T.cast(l.var(), theano.config.floatX)
     
         updates = [(self.c, self.alpha * self.c + (1-self.alpha) * cb),
                    (self.v, self.alpha * self.v + (1-self.alpha) * vb)]
@@ -163,15 +164,15 @@ class BuildModel():
         # Copyright (c) 2015 Alec Radford
         # https://github.com/sordonia/hred-qs/blob/master/adam.py        
         updates = []
-        i = theano.shared(0.0)
+        i = theano.shared(0.0, dtype=theano.config.floatX)
         i_t = i + 1.
         fix1 = 1. - (1. - b1)**i_t
         fix2 = 1. - (1. - b2)**i_t
         lr_t = lr * (T.sqrt(fix2) / fix1)
         for p, mg in zip(params, grads):
             g = -mg
-            m = theano.shared(p.get_value() * 0.)
-            v = theano.shared(p.get_value() * 0.)
+            m = theano.shared(p.get_value() * 0., dtype=theano.config.floatX)
+            v = theano.shared(p.get_value() * 0., dtype=theano.config.floatX)
             m_t = (b1 * g) + ((1. - b1) * m)
             v_t = (b2 * T.sqr(g)) + ((1. - b2) * v)
             g_t = m_t / (T.sqrt(v_t) + e)
@@ -183,7 +184,7 @@ class BuildModel():
         return updates
     
     def update_params(self, grads, L):
-        batch_y = T.dmatrix('batch_y')
+        batch_y = T.matrix('batch_y')
         h = T.lmatrix('h')
         lr = T.scalar('lr')
         
@@ -191,8 +192,10 @@ class BuildModel():
         #updates = [(p, p + lr*g) for (p,g) in zip(self.getParams(), grads)]
         
         # Adam updates
-        updates = self.Adam(grads, self.getParams(), lr, self.b1, self.b2, self.e)
+        #updates = self.Adam(grads, self.getParams(), lr, self.b1, self.b2, self.e)
         
+        updates = lasagne.updates.adam(grads, self.getParams(), lr)#, 1 - self.b1, 1 - self.b2, self.e)
+       
         perform_updates_params = theano.function(
                  outputs=L,
                  inputs=[ theano.Param(batch_y), theano.Param(h), theano.Param(lr)],
@@ -228,7 +231,7 @@ class BuildModel():
                 cx,vx = cv_updater(y, hsamp_np) # update c,v
                 avg_cost = param_updater(y, hsamp_np, learning_rate)
                 if np.mod(batch_counter, 10) == 0:
-                    print '(c,v,L): (%f,%f,%f)\n' % (cx, vx, avg_cost)
+                    print '(c,v,L): (%f,%f,%f)\n' % (np.asarray(cx), np.asarray(vx), avg_cost)
                 hsamp_np0 = self.mrec.getSample(y)
                 if type(avg_cost) == list:
                     avg_costs.append(avg_cost[0])
