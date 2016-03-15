@@ -84,7 +84,7 @@ class GMMRecognition(RecognitionModel):
         return network_params
 
     def getSample(self, Y):
-        pi=self.h.eval({self.Input:Y})
+        pi=np.maximum(self.h.eval({self.Input:Y}), 0)
         x_vals = np.zeros([pi.shape[0],self.xDim])
         for ii in xrange(pi.shape[0]):
             x_vals[ii,:] = np.random.multinomial(1, pi[ii], size=1) #.nonzero()[1]

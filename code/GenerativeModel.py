@@ -6,19 +6,28 @@ import theano.tensor.slinalg as Tsla
 import numpy as np
 from theano.tensor.shared_randomstreams import RandomStreams
 
-def NormalPDF(X,Mu,XChol,xDim):
-    Lambda = Tla.matrix_inverse(T.dot(XChol,T.transpose(XChol)))
-    XMu    = X-Mu
-    return (T.exp(-0.5 * T.dot(XMu, T.dot(Lambda,T.transpose(XMu)))
-                  +0.5 * X.shape[0] * T.log(Tla.det(Lambda))
-                  -0.5 * np.log(2*np.pi) * X.shape[0]*xDim))
+def NormalPDFmat(X,Mu,XChol,xDim):
+    ''' Use this version when X is a matrix [N x xDim] '''
+    return T.exp(logNormalPDFmat(X,Mu,XChol,xDim))
 
-def logNormalPDF(X,Mu,XChol,xDim):
+def logNormalPDFmat(X,Mu,XChol,xDim):
+    ''' Use this version when X is a matrix [N x xDim] '''
     Lambda = Tla.matrix_inverse(T.dot(XChol,T.transpose(XChol)))
     XMu    = X-Mu
     return (-0.5 * T.dot(XMu, T.dot(Lambda,T.transpose(XMu)))
                   +0.5 * X.shape[0] * T.log(Tla.det(Lambda))
                   -0.5 * np.log(2*np.pi) * X.shape[0]*xDim)
+
+def NormalPDF(X,Mu,XChol):
+    return T.exp(logNormalPDF(X,Mu,XChol))
+
+def logNormalPDF(X,Mu,XChol):
+    Lambda = Tla.matrix_inverse(T.dot(XChol,T.transpose(XChol)))
+    XMu    = X-Mu
+    return (-0.5 * T.dot(XMu, T.dot(Lambda,T.transpose(XMu)))
+                  +0.5 * T.log(Tla.det(Lambda))
+                  -0.5 * np.log(2*np.pi) * X.shape[0])
+
 
 class GenerativeModel(object):
     '''
@@ -109,5 +118,5 @@ class MixtureOfGaussians(GenerativeModel):
 
     def evaluateLogDensity(self,h,Y):
         X = h.nonzero()[1]
-        LogDensityVec,_ = theano.map(logNormalPDF, sequences = [Y,self.mu[X],self.RChol[X]], non_sequences=[self.yDim])
+        LogDensityVec,_ = theano.map(logNormalPDF, sequences = [Y,self.mu[X],self.RChol[X]])
         return LogDensityVec + T.log(self.pi[X])
