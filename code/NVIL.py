@@ -149,7 +149,7 @@ class BuildModel():
     
         perform_updates_cv = theano.function(
                  outputs=[self.c,self.v],
-                 inputs=[ theano.Param(batch_y), theano.Param(h)],
+                 inputs=[ theano.In(batch_y), theano.In(h)],
                  updates=updates,
                  givens={
                      self.Y: batch_y,
@@ -174,7 +174,7 @@ class BuildModel():
        
         perform_updates_params = theano.function(
                  outputs=L,
-                 inputs=[ theano.Param(batch_y), theano.Param(h), theano.Param(lr)],
+                 inputs=[ theano.In(batch_y), theano.In(h), theano.In(lr)],
                  updates=updates,
                  givens={
                      self.Y: batch_y,
