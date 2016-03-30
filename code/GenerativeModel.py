@@ -81,8 +81,8 @@ class MixtureOfGaussians(GenerativeModel):
         if 'pi' in GenerativeParams:
             self.pi_un  = theano.shared(value=np.asarray(GenerativeParams['pi'], dtype = theano.config.floatX), name='pi_un', borrow=True)     # cholesky of observation noise cov matrix
         else:
-            self.pi_un  = theano.shared(value=np.asarray(np.ones(xDim), dtype = theano.config.floatX), name='pi_un' ,borrow=True)     # cholesky of observation noise cov matrix
-        self.pi = self.pi_un/self.pi_un.sum()
+            self.pi_un  = theano.shared(value=np.asarray(-10*np.ones(xDim), dtype = theano.config.floatX), name='pi_un' ,borrow=True)     # cholesky of observation noise cov matrix
+        self.pi = T.exp(self.pi_un)/T.exp(self.pi_un).sum()
 
         if 'RChol' in GenerativeParams:
             self.RChol  = theano.shared(value=np.asarray(GenerativeParams['RChol'], dtype = theano.config.floatX), name='RChol' ,borrow=True)     # cholesky of observation noise cov matrix
@@ -97,7 +97,7 @@ class MixtureOfGaussians(GenerativeModel):
 
     def sampleXY(self,_N):
 
-        _mu = self.mu.eval()
+        _mu = np.asarray(self.mu.eval(), dtype = theano.config.floatX)
         _RChol = np.asarray(self.RChol.eval())
         _pi = self.pi.eval()
 
@@ -110,7 +110,7 @@ class MixtureOfGaussians(GenerativeModel):
 
         b_vals = np.asarray(b_vals,dtype = theano.config.floatX)
         y_vals = np.asarray(y_vals,dtype = theano.config.floatX)
-        
+
         return [b_vals, y_vals]
 
     def getParams(self):

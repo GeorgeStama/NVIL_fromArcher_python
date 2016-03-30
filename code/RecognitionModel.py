@@ -71,7 +71,7 @@ class RecognitionModel(object):
 class GMMRecognition(RecognitionModel):
 
     def __init__(self,RecognitionParams,Input,xDim,yDim,srng = None,nrng = None):
-        ''' 
+        '''
         h = Q_phi(x|y), where phi are parameters, x is our latent class, and y are data
         '''
         super(GMMRecognition, self).__init__(Input,None,xDim,yDim,srng,nrng)
@@ -85,13 +85,14 @@ class GMMRecognition(RecognitionModel):
 
     def getSample(self, Y):
         pi=np.maximum(self.h.eval({self.Input:Y}), 0)
+        pi= (1/pi.sum(axis=1))[:, np.newaxis]*pi #enforce normalization (undesirable; for numerical stability)
         x_vals = np.zeros([pi.shape[0],self.xDim])
         for ii in xrange(pi.shape[0]):
             x_vals[ii,:] = np.random.multinomial(1, pi[ii], size=1) #.nonzero()[1]
-            
+
         return x_vals.astype(bool)
 
     def evalLogDensity(self, hsamp):
-        
+
         ''' We assume each sample is a single multinomial sample from the latent h, so each sample is an integer class.'''
         return T.log((self.h*hsamp).sum(axis=1))
