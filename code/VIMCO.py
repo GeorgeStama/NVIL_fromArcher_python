@@ -93,7 +93,7 @@ class BuildModel():
         p_yh = out[0]
         q_hgy = out[1]
         ff = (p_yh-q_hgy)
-        fmax = T.max(ff)
+        fmax = T.max(ff, axis=0)
         f_hy = T.exp(ff - fmax)
         Lhat = T.log(f_hy.mean(axis=0)) + fmax
 
