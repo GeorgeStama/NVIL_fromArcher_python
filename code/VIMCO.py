@@ -1,6 +1,6 @@
 """
 The MIT License (MIT)
-Copyright (c) 2015 Evan Archer & Josh Merel
+Copyright (c) 2015 Evan Archer
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,8 @@ from lasagne.nonlinearities import leaky_rectify, softmax, linear, tanh, rectify
 
 from sklearn.cluster import KMeans
 
+
+
 class BuildModel():
     def __init__(self, 
                 opt_params, # dictionary of optimization parameters
@@ -38,7 +40,6 @@ class BuildModel():
                 REC_MODEL, # class that inherits from RecognitionModel
                 xDim=2, # dimensionality of latent state
                 yDim=2, # dimensionality of observations
-                nCUnits = 100 # number of units used in the (single-layer) bias-correction network
                 ):
         
         # instantiate rng's
@@ -48,7 +49,7 @@ class BuildModel():
         #---------------------------------------------------------
         ## actual model parameters
         self.X, self.Y = T.matrices('X','Y')   # symbolic variables for the data
-        self.hsamp = T.lmatrix('hsamp')
+        self.hsamp = T.tensor3('hsamp')
 
         self.xDim   = xDim
         self.yDim   = yDim
@@ -60,18 +61,10 @@ class BuildModel():
         self.isTrainingRecognitionModel = True;
         self.isTrainingGenerativeModel = True;
         
-        # NVIL Bias-correction network
-        C_nn = lasagne.layers.InputLayer((None, yDim))
-        C_nn = lasagne.layers.DenseLayer(C_nn, nCUnits, nonlinearity=leaky_rectify, W=lasagne.init.Orthogonal())
-        self.C_nn = lasagne.layers.DenseLayer(C_nn, 1, nonlinearity=linear, W=lasagne.init.Orthogonal())
-        
-        self.c = theano.shared(value = np.asarray(opt_params['c0'], dtype=theano.config.floatX))
-        self.v = theano.shared(value = np.asarray(opt_params['v0'], dtype=theano.config.floatX))
-        self.alpha = theano.shared(value = np.asarray(opt_params['alpha'], dtype=theano.config.floatX))
         # ADAM defaults
         self.b1=0.1
         self.b2=0.001
-        self.e=1e-8
+        self.e=1e-8      
         
     def getParams(self):
         ''' 
@@ -80,80 +73,57 @@ class BuildModel():
         params = []        
         params = params + self.mprior.getParams()            
         params = params + self.mrec.getParams()            
-        params = params + lasagne.layers.get_all_params(self.C_nn)
         return params        
         
-    def get_nvil_cost(self,Y,hsamp):
-        '''
-        NOTE: Y and hsamp are both assumed to be symbolic Theano variables. 
-        
-        '''
-        
-        # First, compute L and l (as defined in Algorithm 1 in Gregor & ..., 2014)
-        
-        # evaluate the recognition model density Q_\phi(h_i | y_i)
-        q_hgy = self.mrec.evalLogDensity(hsamp)
+    def compute_objective_and_gradients(self):
+        nSamp = self.hsamp.shape[2]  # How many samples will we take per data point
 
-        # evaluate the generative model density P_\theta(y_i , h_i)
-        p_yh =  self.mprior.evaluateLogDensity(hsamp,Y)
+        def Lhat(h):
+            # evaluate the recognition model density Q_\phi(h_i | y_i)
+            q_hgy = self.mrec.evalLogDensity(h)
+
+            # evaluate the generative model density P_\theta(y_i , h_i)
+            p_yh =  self.mprior.evaluateLogDensity(h, self.Y)
+
+            return [p_yh, q_hgy] # nMiniBatchSize x xDim
+
+        # compute the conditional L(h_j | h_{-j}) thing
+        out, _ = theano.map(Lhat, sequences=[self.hsamp]) # nSamp x nMinibatchSize
+
+        p_yh = out[0]
+        q_hgy = out[1]
+        f_hy = T.exp(p_yh-q_hgy)
+        Lhat = T.log(f_hy.mean(axis=0))
+
+        sum_across_samples = f_hy.sum(axis=0)
+        hold_out = (sum_across_samples - f_hy)/(nSamp-1) + 1e-12 # I have to add a constant here for numerical stability :(. Maybe a bug?
+        Lhat_cv = T.log(sum_across_samples/nSamp) - T.log(hold_out)
+        the_ws = f_hy / sum_across_samples
+
+        weighted_q = T.sum((Lhat_cv*q_hgy + the_ws*(p_yh-q_hgy)).mean(axis=1))
+
+        # gradients for approximate posterior
+        dqhgy = T.grad(cost=weighted_q, wrt = self.mrec.getParams(), consider_constant=[the_ws,Lhat_cv])
+
+        # gradients for prior
+        dpyh = T.grad(cost=Lhat.mean(), wrt = self.mprior.getParams())
         
-        C_out = lasagne.layers.get_output(self.C_nn, inputs = Y).flatten()
-        
-        L = p_yh.mean() - q_hgy.mean()
-        l = p_yh - q_hgy - C_out
-        
-        return [L,l,p_yh,q_hgy,C_out]
-        
-    def get_nvil_gradients(self,l,p_yh,q_hgy,C_out):
-  
-        def comp_param_grad(ii, pyh, qhgy, C, l, c, v):            
-            lii = (l[ii] - c) / T.maximum(1,T.sqrt(v))            
-            dpyh = T.grad(cost=pyh[ii], wrt = self.mprior.getParams())
-            dqhgy = T.grad(cost=qhgy[ii], wrt =  self.mrec.getParams())
-            dcx = T.grad(cost=C[ii], wrt = lasagne.layers.get_all_params(self.C_nn))
-            output = [t for t in dpyh] + [t*lii for t in dqhgy] + [t*lii for t in dcx]
-            return output
-        
-        grads,_ = theano.map(comp_param_grad, sequences = [T.arange(self.Y.shape[0])], non_sequences = [p_yh, q_hgy, C_out, l, self.c, self.v] )
-        
-        return [g.mean(axis=0, dtype=theano.config.floatX) for g in grads]
-    
-    def update_cv(self, l):
-        batch_y = T.matrix('batch_y')
-        h = T.lmatrix('h')
-        
-        # Now compute derived quantities for the update
-        cb = l.mean(dtype = theano.config.floatX)
-        vb = T.cast(l.var(), theano.config.floatX)
-    
-        updates = [(self.c, self.alpha * self.c + (1-self.alpha) * cb),
-                   (self.v, self.alpha * self.v + (1-self.alpha) * vb)]
-    
-        perform_updates_cv = theano.function(
-                 outputs=[self.c,self.v],
-                 inputs=[ theano.In(batch_y), theano.In(h)],
-                 updates=updates,
-                 givens={
-                     self.Y: batch_y,
-                     self.hsamp: h
-                 }
-             )
-        
-        return perform_updates_cv
+        return [Lhat.mean(), dpyh, dqhgy]
+
 
     def update_params(self, grads, L):
         batch_y = T.matrix('batch_y')
-        h = T.lmatrix('h')
+        h = T.tensor3('h')
         lr = T.scalar('lr')
-        
+
         # SGD updates
         #updates = [(p, p + lr*g) for (p,g) in zip(self.getParams(), grads)]
-        
+
         # Adam updates        
         # We negate gradients because we formulate in terms of maximization.
         updates = lasagne.updates.adam([-g for g in grads], self.getParams(), lr) 
         #, 1 - self.b1, 1 - self.b2, self.e)
-       
+
         perform_updates_params = theano.function(
                  outputs=L,
                  inputs=[ theano.In(batch_y), theano.In(h), theano.In(lr)],
@@ -163,20 +133,19 @@ class BuildModel():
                      self.hsamp: h
                  }
              )
-        
+
         return perform_updates_params
-    
-    def fit(self, y_train, batch_size = 50, max_epochs=100, learning_rate = 3e-4):
+
+    def fit(self, y_train, batch_size = 50, max_epochs=100, learning_rate = 3e-4, nSamp = 5):
         
         train_set_iterator = DatasetMiniBatchIterator(y_train, batch_size)
-    
-        L,l,p_yh,q_hgy,C_out = self.get_nvil_cost(self.Y, self.hsamp)
         
-        cv_updater = self.update_cv(l)
-                
-        grads = self.get_nvil_gradients(l,p_yh,q_hgy,C_out)
-    
-        param_updater = self.update_params(grads,L)
+        [Lhat, dpyh, dqhgy] = self.compute_objective_and_gradients()
+        
+        param_updater = self.update_params(dpyh+dqhgy,Lhat)
+
+        # set dummy sampling variable to 0's
+        hsamp_np = np.zeros([nSamp, batch_size, self.xDim]).astype(theano.config.floatX)
 
         avg_costs = []
         
@@ -186,12 +155,13 @@ class BuildModel():
             sys.stdout.flush()
             batch_counter = 0
             for y in train_set_iterator:
-                hsamp_np = self.mrec.getSample(y)
-                cx,vx = cv_updater(y, hsamp_np) # update c,v
+                for idx in np.arange(nSamp):
+                    hsamp_np[idx] = self.mrec.getSample(y)
                 avg_cost = param_updater(y, hsamp_np, learning_rate)
                 if np.mod(batch_counter, 10) == 0:
-                    print '(c,v,L): (%f,%f,%f)\n' % (np.asarray(cx), np.asarray(vx), avg_cost)
+                    print '(L): (%f)\n' % (avg_cost)
                 avg_costs.append(avg_cost)
                 batch_counter += 1
             epoch += 1
+
         return avg_costs
