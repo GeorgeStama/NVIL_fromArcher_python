@@ -92,12 +92,15 @@ class BuildModel():
 
         p_yh = out[0]
         q_hgy = out[1]
-        f_hy = T.exp(p_yh-q_hgy)
-        Lhat = T.log(f_hy.mean(axis=0))
+        ff = (p_yh-q_hgy)
+        fmax = T.max(ff)
+        f_hy = T.exp(ff - fmax)
+        Lhat = T.log(f_hy.mean(axis=0)) + fmax
 
         sum_across_samples = f_hy.sum(axis=0)
-        hold_out = (sum_across_samples - f_hy)/(nSamp-1) + 1e-12 # I have to add a constant here for numerical stability :(. Maybe a bug?
-        Lhat_cv = T.log(sum_across_samples/nSamp) - T.log(hold_out)
+        hold_out = (sum_across_samples - f_hy)/(nSamp-1)
+
+        Lhat_cv = T.log(sum_across_samples/nSamp) - T.log(hold_out) # fmax should cancel itself out here
         the_ws = f_hy / sum_across_samples
 
         weighted_q = T.sum((Lhat_cv*q_hgy + the_ws*(p_yh-q_hgy)).mean(axis=1))
