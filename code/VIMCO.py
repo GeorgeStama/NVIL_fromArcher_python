@@ -109,7 +109,7 @@ class BuildModel():
         dqhgy = T.grad(cost=weighted_q, wrt = self.mrec.getParams(), consider_constant=[the_ws,Lhat_cv])
 
         # gradients for prior
-        dpyh = T.grad(cost=Lhat.mean(), wrt = self.mprior.getParams())
+        dpyh = T.grad(cost=T.sum((the_ws*(p_yh-q_hgy)).mean(axis=1)), wrt = self.mprior.getParams(), consider_constant=[the_ws])
         
         return [Lhat.mean(), dpyh, dqhgy]
 
