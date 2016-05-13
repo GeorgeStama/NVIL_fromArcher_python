@@ -99,7 +99,7 @@ class MixtureOfGaussians(GenerativeModel):
 
         _mu = np.asarray(self.mu.eval(), dtype = theano.config.floatX)
         _RChol = np.asarray(self.RChol.eval())
-        _pi = self.pi.eval()
+        _pi = T.clip(self.pi, 0.001, 0.999).eval()
 
         b_vals = np.random.multinomial(1, _pi, size=_N)
         x_vals = b_vals.nonzero()[1]
