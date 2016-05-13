@@ -102,7 +102,7 @@ class BuildModel():
         # leave one out max
         I = (1-T.eye(ff.shape[0])).astype('int32')
         def loo_sum(i):
-            xi = ff[i.nonzero()]    
+            xi = ff[i]    
             max_xi = T.max(xi, axis=0, keepdims=True)
             exp_xi = T.exp(xi - max_xi)
             return T.log(T.mean(exp_xi, axis=0, keepdims=True)) + max_xi
