@@ -99,18 +99,15 @@ class BuildModel():
 
         sum_across_samples = f_hy.sum(axis=0)
         
-        # leave one out max
         I = (1-T.eye(ff.shape[0])).astype('int32')
-        def loo_sum(i):
+        def loo_subset(i):
             xi = ff[i.nonzero()]    
-            max_xi = T.max(xi, axis=0, keepdims=True)
-            exp_xi = T.exp(xi - max_xi)
-            return T.log(T.mean(exp_xi, axis=0, keepdims=True)) + max_xi
-        hold_out,_ = theano.map(loo_sum, sequences = I)        
+            return xi
+        ff_subs,_ = theano.map(loo_subset, sequences = I)  
+        ff_smax = T.max(ff_subs, axis=1, keepdims=True)
+        hold_out = T.log(T.exp(ff_subs - ff_smax).mean(axis=1,keepdims=True)) + ff_smax
         
-        #hold_out = (sum_across_samples - f_hy)/(nSamp-1)
-
-        Lhat_cv = T.log(sum_across_samples/nSamp) + fmax - hold_out #T.log(hold_out)
+        Lhat_cv = T.log(sum_across_samples/nSamp) + fmax - hold_out
         the_ws = f_hy / sum_across_samples
 
         weighted_q = T.sum((Lhat_cv*q_hgy + the_ws*(p_yh-q_hgy)).mean(axis=1))
@@ -121,7 +118,7 @@ class BuildModel():
         # gradients for prior
         dpyh = T.grad(cost=T.sum((the_ws*(p_yh-q_hgy)).mean(axis=1)), wrt = self.mprior.getParams(), consider_constant=[the_ws])
         
-        return [Lhat.mean(), dpyh, dqhgy, ff]
+        return [Lhat.mean(), dpyh, dqhgy, ff, T.log(hold_out+eps)+fmax]
 
 
     def update_params(self, grads, L):
@@ -153,7 +150,7 @@ class BuildModel():
         
         train_set_iterator = DatasetMiniBatchIterator(y_train, batch_size)
         
-        [Lhat, dpyh, dqhgy, _] = self.compute_objective_and_gradients()
+        [Lhat, dpyh, dqhgy, _, _] = self.compute_objective_and_gradients()
         
         param_updater = self.update_params(dpyh+dqhgy,Lhat)
 
